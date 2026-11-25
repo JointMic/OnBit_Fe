@@ -516,6 +516,7 @@ const Widget = memo(function Widget({
 
 	const onPointerDown = (e: ReactPointerEvent) => {
 		if (!editable || e.button !== 0 || !e.isPrimary) return
+		if ((e.target as HTMLElement).closest('button, input, select, textarea, label')) return
 		if (e.pointerType !== 'touch' || (e.target as HTMLElement).closest('[data-drag-handle]')) {
 			controls.start(e)
 			return

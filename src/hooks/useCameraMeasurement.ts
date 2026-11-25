@@ -1,0 +1,27 @@
+import {useEffect,useRef,useState} from 'react'
+import usePPGProcessing from './heartlens/usePPGProcessing'
+import useSignalQuality from './heartlens/useSignalQuality'
+import type {Reading} from './useLive'
+export function useCameraMeasurement(){
+ const videoRef=useRef<HTMLVideoElement>(null),canvasRef=useRef<HTMLCanvasElement>(null),previewRef=useRef<HTMLCanvasElement>(null);
+ const stream=useRef<MediaStream|null>(null);const attempt=useRef(0);const running=useRef(false);const mounted=useRef(true);const starting=useRef(false);
+ const [devices,setDevices]=useState<MediaDeviceInfo[]>([]);const [deviceId,setDeviceId]=useState('');
+ const [recording,setRecording]=useState(false),[pending,setPending]=useState(false),[error,setError]=useState('');
+ const [data,setData]=useState<Reading|null>(null),[series,setSeries]=useState<Reading[]>([]),[elapsed,setElapsed]=useState(0);const [torchAvailable,setTorchAvailable]=useState(false),[torch,setTorch]=useState(false);
+ const processor=usePPGProcessing(recording,'default',videoRef,canvasRef);
+ const quality=useSignalQuality(processor.ppgData,recording);
+ const latest=useRef({processor,quality});latest.current={processor,quality};
+ function stop(){attempt.current++;running.current=false;starting.current=false;stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;if(videoRef.current){videoRef.current.srcObject=null}if(mounted.current){setRecording(false);setPending(false);setTorch(false);setTorchAvailable(false);setData(v=>v?{...v,recording:false}:null)}}
+ useEffect(()=>{mounted.current=true;const leave=()=>stop();window.addEventListener('pagehide',leave);const hidden=()=>{if(document.hidden)stop()};document.addEventListener('visibilitychange',hidden);return()=>{mounted.current=false;stop();window.removeEventListener('pagehide',leave);document.removeEventListener('visibilitychange',hidden)}},[]);
+ async function start(chosenId=deviceId){if(starting.current||running.current)return;setError('');if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){setError('HTTPS 환경에서 카메라를 지원하는 브라우저로 열어주세요.');return}starting.current=true;setPending(true);const id=++attempt.current;
+ try{let media:MediaStream;
+ try{media=await navigator.mediaDevices.getUserMedia({audio:false,video:{...(chosenId?{deviceId:{exact:chosenId}}:{facingMode:{ideal:'environment'}}),width:{ideal:640},height:{ideal:480},frameRate:{ideal:30}}})}
+ catch(e){if(chosenId&&e instanceof DOMException&&['NotFoundError','OverconstrainedError'].includes(e.name)){media=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'}}})}else throw e}
+ if(id!==attempt.current||!mounted.current){media.getTracks().forEach(t=>t.stop());return}stream.current=media;setDevices((await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput'));setDeviceId(media.getVideoTracks()[0].getSettings().deviceId||chosenId);const video=videoRef.current;if(!video)throw Error('preview');video.srcObject=media;await video.play();if(id!==attempt.current){media.getTracks().forEach(t=>t.stop());return}const track=media.getVideoTracks()[0];const caps=track.getCapabilities?.() as MediaTrackCapabilities & {torch?:boolean};setTorchAvailable(!!caps?.torch);track.addEventListener('ended',()=>{if(stream.current===media){stop();setError('카메라 연결이 종료됐어요.')}});setSeries([]);setData(null);setElapsed(0);running.current=true;setRecording(true);
+ }catch(e){if(id===attempt.current&&mounted.current){stop();const name=e instanceof DOMException?e.name:'';setError(name==='NotAllowedError'?'카메라 권한을 허용한 뒤 다시 켜주세요.':name==='NotFoundError'?'사용 가능한 카메라가 없어요.':name==='NotReadableError'?'다른 앱이 카메라를 사용 중인지 확인해주세요.':'카메라를 시작하지 못했어요. 다시 시도해주세요.')}}finally{if(id===attempt.current&&mounted.current){starting.current=false;setPending(false)}}}
+ async function toggleTorch(){const track=stream.current?.getVideoTracks()[0];if(!track)return;try{await track.applyConstraints({advanced:[{torch:!torch} as MediaTrackConstraintSet]});setTorch(v=>!v)}catch{setError('이 기기에서는 플래시를 제어할 수 없어요.')}}
+ useEffect(()=>{if(!recording)return;let frame=0;const started=performance.now();let last=0;const tick=(now:number)=>{if(!running.current)return;const {processor:p,quality:q}=latest.current;p.processFrame();if(previewRef.current&&canvasRef.current){previewRef.current.getContext('2d')?.drawImage(canvasRef.current,0,0,640,480)}if(now-last>=250){last=now;setElapsed(Math.floor((now-started)/1000));const row:Reading={code:'camera',recording:true,heartRate:p.heartRate.bpm>0&&Number.isFinite(p.heartRate.bpm)?p.heartRate.bpm:null,sdnn:p.hrv.confidence>0&&Number.isFinite(p.hrv.sdnn)?p.hrv.sdnn:null,quality:p.ppgData.length>=100&&['bad','acceptable','excellent'].includes(q.signalQuality)?q.signalQuality:null,updatedAt:new Date().toISOString()};setData(row);setSeries(v=>[...v.slice(-2999),row])}frame=requestAnimationFrame(tick)};frame=requestAnimationFrame(tick);return()=>cancelAnimationFrame(frame)},[recording]);
+ async function selectCamera(id:string){const wasRunning=running.current;stop();setDeviceId(id);if(wasRunning)await start(id)}
+ return {devices,deviceId,selectCamera,videoRef,canvasRef,previewRef,recording,pending,error,data,series,elapsed,torch,torchAvailable,start,stop,toggleTorch,ppg:processor.ppgData,valleys:processor.valleys,modelStatus:quality.modelStatus,status:pending?'카메라 연결 중':recording?'측정 중':series.length?'측정 종료':'측정 준비'};
+}
+export type CameraMeasurement=ReturnType<typeof useCameraMeasurement>
