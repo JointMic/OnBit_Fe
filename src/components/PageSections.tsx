@@ -1,0 +1,18 @@
+import {useState} from 'react'
+import {Heart, Activity, Radio, Coffee, Moon, Footprints, ChevronRight, Droplets} from 'lucide-react'
+import type {Reading} from '../hooks/useLive'
+export function Overview({data,series,status,open}:{data:Reading|null;series:Reading[];status:string;open:(id:string)=>void}){
+ const latest=(key:'heartRate'|'sdnn')=>data?.[key]??[...series].reverse().find(v=>v[key]!=null)?.[key]??'—';
+ const quality=status==='측정 중'?({excellent:'좋음',acceptable:'보통',bad:'불량'}[data?.quality||'']||'분석 중'):'대기';
+ const rows=[{id:'heart',name:'심박수',value:latest('heartRate'),unit:'BPM',icon:Heart},{id:'hrv',name:'심박 변이도',value:latest('sdnn'),unit:'ms · SDNN',icon:Activity},{id:'glucose',name:'혈당 추정',value:'—',unit:'mg/dL · 연동 대기',icon:Droplets}];
+ return <><div className="overview-metrics">{rows.map(({id,name,value,unit,icon:Icon})=><button className={`overview-metric ${id}`} key={id} onClick={()=>open(id)}><div><Icon size={17}/><span>{name}</span><ChevronRight size={14}/></div><strong>{value}</strong><small>{unit}</small>{['heart','hrv'].includes(id)&&data?.[id==='heart'?'heartRate':'sdnn']==null&&value!=='—'&&<span className="last-label">마지막 유효값</span>}</button>)}</div></>
+}
+const dayKey=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+type JournalData={sleep:string;caffeine:string;activity:string};
+const empty:JournalData={sleep:'',caffeine:'',activity:''};
+export function Journal(){const [entry,setEntry]=useState<JournalData>(()=>{try{return {...empty,...JSON.parse(localStorage.getItem('onbit-journal-'+dayKey())||'{}')}}catch{return empty}});const [saved,setSaved]=useState(false);
+function update(key:keyof JournalData,value:string){setEntry(v=>({...v,[key]:value}));setSaved(false)}
+return <section className="page-section journal"><div className="section-heading"><h2>오늘의 생활 기록</h2><span>{dayKey()}</span></div><form onSubmit={e=>{e.preventDefault();try{localStorage.setItem('onbit-journal-'+dayKey(),JSON.stringify(entry));setSaved(true)}catch{setSaved(false)}}}>{([{key:'sleep',label:'지난밤 수면',icon:Moon,options:['6시간 미만','6–8시간','8시간 이상']},{key:'caffeine',label:'오늘 카페인',icon:Coffee,options:['없음','1잔','2잔 이상']},{key:'activity',label:'오늘 활동',icon:Footprints,options:['휴식','가벼운 활동','운동']} ] as const).map(({key,label,icon:Icon,options})=><fieldset key={key}><legend><Icon size={16}/>{label}</legend><div className="journal-options">{options.map(option=><button type="button" key={option} aria-pressed={entry[key]===option} className={entry[key]===option?'chosen':''} onClick={()=>update(key,option)}>{option}</button>)}</div></fieldset>)}<div className="journal-save"><p role="status">{saved?'이 브라우저에 저장했어요.':'직접 입력한 기록 · 건강 점수에 반영되지 않아요.'}</p><button type="submit">{saved?'저장됨':'기록 저장'}</button></div></form></section>
+}
+export function MetricGuide(){return <section className="page-section metric-guide"><h2>지표 알아보기</h2>{[['심박수 · BPM','1분 동안의 맥박 횟수예요. 카메라 PPG에서 검출한 맥박 간격으로 계산해요.'],['심박 변이도 · SDNN','검출한 맥박 사이 시간 간격의 변동 정도예요. 충분한 간격이 검출되지 않으면 표시하지 않아요.'],['신호 품질','모델이 PPG 신호를 좋음·보통·불량으로 분류해요. 건강 상태나 측정 정확도를 보장하는 점수는 아니에요.']].map(([label,text])=><details key={label}><summary>{label}</summary><p>{text}</p></details>)}</section>}
+export function SessionSummary({series}:{series:Reading[]}){const valid=series.filter(v=>v.heartRate!==null);return <div className="session-summary"><div><span>표시 구간</span><strong>최근 2분 이내</strong></div><div><span>심박수 평균</span><strong>{valid.length?Math.round(valid.reduce((sum,v)=>sum+v.heartRate!,0)/valid.length):'—'} <small>BPM</small></strong></div><div><span>유효값 수신</span><strong>{valid.length}<small> / {series.length}회</small></strong></div></div>}
