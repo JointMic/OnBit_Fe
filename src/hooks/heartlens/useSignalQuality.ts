@@ -1,20 +1,74 @@
-// HeartLens feature extraction and pretrained quality model, executed locally.
-import {useEffect,useRef,useState} from 'react'
-import type * as TF from '@tensorflow/tfjs'
-export default function useSignalQuality(ppgData:number[],enabled=true){
- const model=useRef<TF.LayersModel|null>(null);const tf=useRef<typeof TF|null>(null);const last=useRef(0);
- const [signalQuality,setQuality]=useState('--');const [qualityConfidence,setConfidence]=useState(0);const [modelStatus,setStatus]=useState('대기');
- useEffect(()=>{if(!enabled)return;let cancelled=false;setStatus('로딩 중');
- (async()=>{try{const runtime=await import('@tensorflow/tfjs');await runtime.ready();const loaded=await runtime.loadLayersModel('/tfjs_model/model.json');if(cancelled){loaded.dispose();return}tf.current=runtime;model.current=loaded;setStatus('준비')}catch{if(!cancelled)setStatus('모델 로드 실패')}})();
- return()=>{cancelled=true;model.current?.dispose();model.current=null;tf.current=null;setQuality('--');setConfidence(0)}
- },[enabled]);
- useEffect(()=>{if(!enabled||ppgData.length<100||!model.current||!tf.current||performance.now()-last.current<500)return;last.current=performance.now();const features=calculateFeatures(ppgData);if(features.some(v=>!Number.isFinite(v)))return;
- try{const runtime=tf.current;const probabilities=runtime.tidy(()=>{const prediction=model.current!.predict(runtime.tensor2d([features])) as TF.Tensor;return Array.from(prediction.dataSync())});const index=probabilities.indexOf(Math.max(...probabilities));setQuality(['bad','acceptable','excellent'][index]);setConfidence(probabilities[index]*100)}catch{setStatus('분석 실패')}
- },[ppgData,enabled]);
- return {signalQuality,qualityConfidence,modelStatus};
+// hooks/useSignalQuality.ts
+import { useState, useEffect, useRef } from 'react';
+import * as tf from '@tensorflow/tfjs';
+
+interface SignalQualityResults {
+  signalQuality: string;
+  qualityConfidence: number;
 }
 
-function calculateFeatures(signal:number[]):number[] {
+/**
+ * Custom hook for analyzing PPG signal quality
+ * @param {number[]} ppgData - Array of PPG signal values to analyze
+ * @returns {Object} Object containing:
+ *   - signalQuality: String indicating signal quality ('Excellent', 'Good', 'Fair', 'Poor')
+ *   - qualityConfidence: Number between 0-1 representing confidence in the quality assessment
+ */
+export default function useSignalQuality(
+  ppgData: number[]
+): SignalQualityResults {
+  const modelRef = useRef<tf.LayersModel | null>(null);
+  const [signalQuality, setSignalQuality] = useState<string>('--');
+  const [qualityConfidence, setQualityConfidence] = useState<number>(0);
+
+  // Load TensorFlow.js model
+  useEffect(() => {
+    const loadModel = async () => {
+      try {
+        const loadedModel = await tf.loadLayersModel('/tfjs_model/model.json');
+        modelRef.current = loadedModel;
+        console.log('PPG quality assessment model loaded successfully');
+      } catch (error) {
+        console.error('Error loading model:', error);
+      }
+    };
+
+    loadModel();
+  }, []);
+
+  useEffect(() => {
+    if (ppgData.length >= 100) {
+      assessSignalQuality(ppgData);
+    }
+  }, [ppgData]);
+
+  const assessSignalQuality = async (signal: number[]) => {
+    if (!modelRef.current || signal.length < 100) return;
+
+    try {
+      const features = calculateFeatures(signal);
+      const inputTensor = tf.tensor2d([features]);
+      const prediction = (await modelRef.current.predict(
+        inputTensor
+      )) as tf.Tensor;
+      const probabilities = await prediction.data();
+
+      const classIndex = probabilities.indexOf(Math.max(...probabilities));
+      const classes = ['bad', 'acceptable', 'excellent'];
+      const predictedClass = classes[classIndex];
+      const confidence = probabilities[classIndex] * 100;
+
+      setSignalQuality(predictedClass);
+      setQualityConfidence(confidence);
+
+      inputTensor.dispose();
+      prediction.dispose();
+    } catch (error) {
+      console.error('Error assessing signal quality:', error);
+    }
+  };
+
+  const calculateFeatures = (signal: number[]): number[] => {
     if (!signal.length) return new Array(19).fill(0);
   
     // Basic statistics
@@ -33,8 +87,8 @@ function calculateFeatures(signal:number[]):number[] {
   
     // Higher-order statistics
     const diff = signal.map(val => val - mean);
-    const skewness = diff.reduce((sum, val) => sum + Math.pow(val, 3), 0) / signal.length / Math.pow(std || 1e-7, 3);
-    const kurtosis = diff.reduce((sum, val) => sum + Math.pow(val, 4), 0) / signal.length / Math.pow(std || 1e-7, 4);
+    const skewness = diff.reduce((sum, val) => sum + Math.pow(val, 3), 0) / signal.length / Math.pow(std, 3);
+    const kurtosis = diff.reduce((sum, val) => sum + Math.pow(val, 4), 0) / signal.length / Math.pow(std, 4);
   
     // Perfusion (approximation)
     const perfusion = (signalMax - signalMin) / (Math.abs(mean) + 1e-7) * 100;
@@ -96,3 +150,5 @@ function calculateFeatures(signal:number[]):number[] {
     return sorted[lower] * (1 - fraction) + sorted[upper] * fraction;
   }
   
+  return { signalQuality, qualityConfidence };
+}

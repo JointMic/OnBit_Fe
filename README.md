@@ -1,3 +1,5 @@
+> 현재 배포(2026-11-25): 현수님 원본 `2e26543`의 `usePPGProcessing.ts`, `useSignalQuality.ts` 파일을 수정 없이 사용한다. 아래 이전 개선 기록 중 프레임 콜백·FPS 재계산·UI/분석 주기 제한·접촉/주기성 검사는 현재 적용되지 않는다. 프레임 처리는 원래 requestAnimationFrame 루프, 처리 캔버스는 640×480이다. 앱의 기기 카메라 선택과 시작/종료·화면 연결 코드는 앱 구조에 맞춘 연결부로 남아 있다. 이전 버전은 `codex/backup-periodicity-gate-20261125`에 보관되어 있다.
+
 # OnBit Consumer
 React / TypeScript / Vite / Tailwind CSS 기반 모바일 건강 데모.
 

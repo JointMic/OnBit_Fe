@@ -1,6 +1,5 @@
-import {sampledFrameRate} from '../../lib/cameraFrameLoop';
 // hooks/usePPGProcessing.ts
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 // import * as tf from '@tensorflow/tfjs';
 
 interface Valley {
@@ -31,8 +30,9 @@ interface PPGProcessingResult {
   valleys: Valley[];
   heartRate: HeartRateResult;
   hrv: HRVResult;
-  processFrame: (frameId?:number,mediaTime?:number) => void;
-  getValidity: () => {contact:boolean;stable:boolean;hrvReady:boolean;reason:string;fps:number;duration:number;correlation:number;amplitude:number;beats:number};
+  processFrame: () => void;
+  startCamera: () => Promise<void>;
+  stopCamera: () => void;
 }
 
 /**
@@ -62,29 +62,14 @@ export default function usePPGProcessing(
     bpm: 0,
     confidence: 0,
   });
+  const [confidence, setConfidence] = useState<number>(0);
   const [hrv, setHRV] = useState<HRVResult>({ sdnn: 0, confidence: 0 });
 
-  const gate = useRef({contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:0,duration:0,correlation:0,amplitude:0,beats:0});
-  const sampleBuffer=useRef<number[]>([]);
-  const frameTimes=useRef<number[]>([]);
-  const mediaEpoch=useRef<number|null>(null);
-  const lastPublish=useRef(0);
-  const contactSince = useRef<number|null>(null);
-  const lastAnalysis = useRef(0);
-  const lastVideoTime = useRef(-1);
-
+  const streamRef = useRef<MediaStream | null>(null);
 
   const fpsRef = useRef<number>(30);
-
-  useEffect(() => {
-    if (isRecording) {
-      setPpgData([]); setValleys([]);
-      setHeartRate({bpm:0,confidence:0}); setHRV({sdnn:0,confidence:0});
-      gate.current={contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:0,duration:0,correlation:0,amplitude:0,beats:0};contactSince.current=null;sampleBuffer.current=[];frameTimes.current=[];mediaEpoch.current=null;lastPublish.current=0;
-      lastVideoTime.current=-1; lastAnalysis.current=0;
-      fpsRef.current=30;
-    }
-  }, [isRecording]);
+  const frameTimeRef = useRef<number>(0);
+  const framesRef = useRef<number>(0);
 
   const samplePoints = [
     { x: 0.2, y: 0.2 }, // top-left
@@ -94,28 +79,84 @@ export default function usePPGProcessing(
     { x: 0.8, y: 0.8 }, // bottom-right
   ];
 
-  // A frame's identity comes from compositor metadata, not rounded currentTime.
-  const processFrame = (frameId?:number,mediaTime?:number) => {
-    if(!videoRef.current||!canvasRef.current||videoRef.current.readyState<2)return;
-    const identity=frameId??videoRef.current.currentTime;
-    if(identity===lastVideoTime.current)return;
-    lastVideoTime.current=identity;
-    const now=performance.now();
-    if(mediaEpoch.current===null&&mediaTime!==undefined)mediaEpoch.current=Date.now()-mediaTime*1000;
-    const sampleTime=mediaTime!==undefined&&mediaEpoch.current!==null?mediaEpoch.current+mediaTime*1000:Date.now();
-    frameTimes.current=[...frameTimes.current.filter(t=>sampleTime-t<=3000),sampleTime];
-    const measured=sampledFrameRate(frameTimes.current);
-    if(measured>0)fpsRef.current=measured;
-    gate.current.fps=measured;
+  // Start camera
+  const startCamera = async (): Promise<void> => {
+    try {
+      if (!window.isSecureContext) {
+        console.error('Camera access requires HTTPS');
+        return;
+      }
+
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
+      });
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = newStream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play();
+        };
+      }
+
+      streamRef.current = newStream;
+
+      // Enable flashlight if available
+      try {
+        const track = newStream.getVideoTracks()[0];
+        const capabilities = track.getCapabilities() as any;
+
+        if (capabilities?.torch) {
+          await track.applyConstraints({
+            advanced: [{ torch: true }],
+          } as any);
+        }
+      } catch (torchError) {
+        console.log('Torch not available:', torchError);
+      }
+    } catch (err) {
+      console.error('Error accessing camera:', err);
+    }
+  };
+
+  // Stop camera
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+  };
+
+  // Measure FPS
+  const measureFPS = () => {
+    const now = performance.now();
+    const elapsed = now - frameTimeRef.current;
+
+    if (elapsed >= 1000) {
+      const currentFps = Math.round((framesRef.current * 1000) / elapsed);
+      fpsRef.current = currentFps;
+      framesRef.current = 0;
+      frameTimeRef.current = now;
+    }
+    framesRef.current++;
+  };
+
+  // Process each video frame
+  const processFrame = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    measureFPS();
 
     const canvas = canvasRef.current;
-    const context = canvas.getContext('2d',{willReadFrequently:true});
+    const context = canvas.getContext('2d');
     if (!context) return;
 
     try {
       context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      if(contactSince.current===null)contactSince.current=performance.now();
-      gate.current.duration=(performance.now()-contactSince.current)/1000;
 
       let rSum = 0,
         gSum = 0,
@@ -130,7 +171,10 @@ export default function usePPGProcessing(
           // Validate coordinates
           if (x >= 0 && x < canvas.width && y >= 0 && y < canvas.height) {
             const pixel = context.getImageData(x, y, 1, 1).data;
-            rSum += pixel[0];gSum += pixel[1];bSum += pixel[2];validSamples++;
+            rSum += pixel[0];
+            gSum += pixel[1];
+            bSum += pixel[2];
+            validSamples++;
 
             // Visualize sampling points
             context.beginPath();
@@ -166,22 +210,21 @@ export default function usePPGProcessing(
           ppgSignal = (2 * rSum - gSum - bSum) / validSamples;
       }
 
-      const newData=[...sampleBuffer.current.slice(-300),ppgSignal];
-      sampleBuffer.current=newData;
-      // UI/quality snapshots at 8 Hz; optical sampling stays at camera cadence.
-      if(now-lastPublish.current>=125){lastPublish.current=now;setPpgData(newData)}
-        if (newData.length >= 100 && performance.now() - lastAnalysis.current >= 500) {
-          lastAnalysis.current = performance.now();
-          const newValleys=detectValleys(newData);
-          const heartRateValue=calculateHeartRate(newValleys);
-          const hrvValues=calculateHRV(newValleys);
-          // Original HeartLens calculation, without added contact/periodicity gates.
-          gate.current={contact:true,stable:heartRateValue.bpm>0,hrvReady:hrvValues.confidence>0,reason:heartRateValue.bpm>0?'':'맥박 간격 수집 중',fps:fpsRef.current,duration:(performance.now()-(contactSince.current??performance.now()))/1000,correlation:0,amplitude:Math.max(...newData)-Math.min(...newData),beats:newValleys.length};
+      setPpgData((prev) => {
+        const newData = [...prev.slice(-300), ppgSignal];
+        if (newData.length >= 100) {
+          const newValleys = detectValleys(newData);
           setValleys(newValleys);
+
+          const heartRateValue = calculateHeartRate(newValleys);
           setHeartRate(heartRateValue);
+          setConfidence(confidence);
+
+          const hrvValues = calculateHRV(newValleys);
           setHRV(hrvValues);
         }
-
+        return newData;
+      });
     } catch (err) {
       console.error('Error in processFrame:', err);
     }
@@ -221,7 +264,6 @@ export default function usePPGProcessing(
   const normalizeSignal = (signal: number[]): number[] => {
     const min = Math.min(...signal);
     const max = Math.max(...signal);
-    if (max === min) return signal.map(() => 0);
     return signal.map((value) => (value - min) / (max - min));
   };
 
@@ -288,7 +330,7 @@ export default function usePPGProcessing(
       (interval) => interval >= 250 && interval <= 2000
     );
 
-    if (validIntervals.length < 2) return { sdnn: 0, confidence: 0 };
+    if (validIntervals.length === 0) return { sdnn: 0, confidence: 0 };
 
     const meanRR =
       validIntervals.reduce((sum, rr) => sum + rr, 0) / validIntervals.length;
@@ -317,6 +359,7 @@ export default function usePPGProcessing(
     heartRate,
     hrv,
     processFrame,
-    getValidity:()=>gate.current,
+    startCamera,
+    stopCamera,
   };
 }
