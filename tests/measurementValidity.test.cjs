@@ -1,0 +1,16 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');const ts=require('typescript');
+const compiled=ts.transpileModule(fs.readFileSync('src/lib/measurementValidity.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const mod={exports:{}};new Function('exports','module',compiled)(mod.exports,mod);
+const {contactCandidate,pulseCandidate}=mod.exports;
+const image=(fn)=>Uint8ClampedArray.from(Array.from({length:32*24},(_,i)=>[...fn(i),255]).flat());
+for(const rgb of [[110,110,110],[0,0,0],[255,255,255],[40,130,30],[40,65,180]])assert.equal(contactCandidate(image(()=>rgb)),false,`Non-contact RGB ${rgb}`);
+assert.equal(contactCandidate(image(i=>i%2?[190,185,180]:[70,72,74])),false,'Textured neutral floor');
+assert.equal(contactCandidate(image(()=>[180,60,50])),true,'Red candidate is only a candidate, not proof of tissue');
+assert.equal(pulseCandidate(Array(300).fill(200),30),false,'Uniform red object: no pulse');
+assert.equal(pulseCandidate(Array.from({length:300},(_,i)=>150+i*.2),30),false,'Exposure ramp');
+let seed=42;const noise=Array.from({length:600},()=>{seed=(seed*1664525+1013904223)>>>0;return 200+(seed/4294967296-.5)*10});
+assert.equal(pulseCandidate(noise,30),false,'Nonperiodic camera noise');
+assert.equal(pulseCandidate(Array.from({length:300},(_,i)=>200+2*Math.sin(i/30*2*Math.PI*1.2)),30),true,'Synthetic periodic signal');
+assert.equal(pulseCandidate(Array(30).fill(1),30),false,'Insufficient window');
+console.log('Validity checks passed: non-contact surfaces, darkness, saturation, flat red object, exposure drift, random noise, short window and synthetic pulse.');

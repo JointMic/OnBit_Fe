@@ -1,3 +1,4 @@
+import {contactCandidate,pulseCandidate} from '../../lib/measurementValidity';
 // hooks/usePPGProcessing.ts
 import { useState, useRef, useEffect } from 'react';
 // import * as tf from '@tensorflow/tfjs';
@@ -31,6 +32,7 @@ interface PPGProcessingResult {
   heartRate: HeartRateResult;
   hrv: HRVResult;
   processFrame: () => void;
+  getValidity: () => {contact:boolean;stable:boolean;hrvReady:boolean};
 }
 
 /**
@@ -63,6 +65,9 @@ export default function usePPGProcessing(
   const [confidence, setConfidence] = useState<number>(0);
   const [hrv, setHRV] = useState<HRVResult>({ sdnn: 0, confidence: 0 });
 
+  const gate = useRef({contact:false,stable:false,hrvReady:false});
+  const contactSince = useRef<number|null>(null);
+  const contactCanvas = useRef<HTMLCanvasElement|null>(null);
   const lastAnalysis = useRef(0);
   const lastVideoTime = useRef(-1);
 
@@ -75,6 +80,7 @@ export default function usePPGProcessing(
     if (isRecording) {
       setPpgData([]); setValleys([]);
       setHeartRate({bpm:0,confidence:0}); setHRV({sdnn:0,confidence:0});
+      gate.current={contact:false,stable:false,hrvReady:false};contactSince.current=null;
       lastVideoTime.current=-1; lastAnalysis.current=0;
       frameTimeRef.current=performance.now(); framesRef.current=0; fpsRef.current=30;
     }
@@ -117,6 +123,20 @@ export default function usePPGProcessing(
 
     try {
       context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      if(!contactCanvas.current){contactCanvas.current=document.createElement('canvas');contactCanvas.current.width=32;contactCanvas.current.height=24;}
+      const contactContext=contactCanvas.current.getContext('2d',{willReadFrequently:true});
+      if(!contactContext)return;
+      contactContext.drawImage(videoRef.current,0,0,32,24);
+      const contact=contactCandidate(contactContext.getImageData(0,0,32,24).data);
+      gate.current.contact=contact;
+      if(!contact){
+        contactSince.current=null;gate.current={contact:false,stable:false,hrvReady:false};
+        setPpgData(prev=>prev.length?[]:prev);setValleys(prev=>prev.length?[]:prev);
+        setHeartRate(prev=>prev.bpm?{bpm:0,confidence:0}:prev);setHRV(prev=>prev.confidence?{sdnn:0,confidence:0}:prev);
+        return;
+      }
+      if(contactSince.current===null)contactSince.current=performance.now();
+
 
       let rSum = 0,
         gSum = 0,
@@ -171,18 +191,21 @@ export default function usePPGProcessing(
       }
 
       setPpgData((prev) => {
-        const newData = [...prev.slice(-300), ppgSignal];
+        const newData = [...prev.slice(-899), ppgSignal];
         if (newData.length >= 100 && performance.now() - lastAnalysis.current >= 500) {
           lastAnalysis.current = performance.now();
           const newValleys = detectValleys(newData);
-          setValleys(newValleys);
+          const stable=performance.now()-(contactSince.current??performance.now())>=5000&&pulseCandidate(newData,fpsRef.current)&&newValleys.length>=5;
+          gate.current.stable=stable;
+          gate.current.hrvReady=stable&&newValleys.length>=11&&newValleys[newValleys.length-1].timestamp.getTime()-newValleys[0].timestamp.getTime()>=10000;
+          setValleys(stable?newValleys:[]);
 
           const heartRateValue = calculateHeartRate(newValleys);
-          setHeartRate(heartRateValue);
+          setHeartRate(stable?heartRateValue:{bpm:0,confidence:0});
           setConfidence(confidence);
 
           const hrvValues = calculateHRV(newValleys);
-          setHRV(hrvValues);
+          setHRV(gate.current.hrvReady?hrvValues:{sdnn:0,confidence:0});
         }
         return newData;
       });
@@ -321,5 +344,6 @@ export default function usePPGProcessing(
     heartRate,
     hrv,
     processFrame,
+    getValidity:()=>gate.current,
   };
 }

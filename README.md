@@ -34,3 +34,8 @@ React / TypeScript / Vite / Tailwind CSS 기반 모바일 건강 데모.
 Consumer: https://onbit-fe.vercel.app
 Monitor (별도 유지): https://onbit-monitor.vercel.app
 `vercel deploy --prod --scope pdgdaccord`
+
+## Measurement validity gate
+Non-contact surfaces can produce periodic image noise; valley detection alone is not evidence of a pulse. The consumer app now gates numeric outputs on a conservative red-dominant, low-texture contact candidate, at least five seconds of continuous contact, repeating optical signal, sufficient detected intervals, and an acceptable/excellent quality-model output with classification confidence >=70. This threshold is a display gate, not a calibrated accuracy probability. HRV additionally needs at least ten intervals spanning ten seconds. Contact loss clears processing buffers and masks current readings and markers; old values cannot be shown as current. Camera archives predating the validity flag are excluded from display.
+
+The RGB heuristic is not a validated tissue or liveness detector. Red objects or synthetic periodic illumination may still fool it, and legitimate fingers in unsupported lighting may be rejected. Accuracy/thresholds require device testing and algorithm-team validation. Synthetic regression checks: `node tests/measurementValidity.test.cjs`.
