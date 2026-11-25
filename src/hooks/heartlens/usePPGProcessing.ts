@@ -1,5 +1,4 @@
 import {sampledFrameRate} from '../../lib/cameraFrameLoop';
-import {contactCandidate,pulseAssessment,detrendPulse} from '../../lib/measurementValidity';
 // hooks/usePPGProcessing.ts
 import { useState, useRef, useEffect } from 'react';
 // import * as tf from '@tensorflow/tfjs';
@@ -63,7 +62,6 @@ export default function usePPGProcessing(
     bpm: 0,
     confidence: 0,
   });
-  const [confidence, setConfidence] = useState<number>(0);
   const [hrv, setHRV] = useState<HRVResult>({ sdnn: 0, confidence: 0 });
 
   const gate = useRef({contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:0,duration:0,correlation:0,amplitude:0,beats:0});
@@ -71,9 +69,7 @@ export default function usePPGProcessing(
   const frameTimes=useRef<number[]>([]);
   const mediaEpoch=useRef<number|null>(null);
   const lastPublish=useRef(0);
-  const sampleTimes=useRef<number[]>([]);
   const contactSince = useRef<number|null>(null);
-  const contactCanvas = useRef<HTMLCanvasElement|null>(null);
   const lastAnalysis = useRef(0);
   const lastVideoTime = useRef(-1);
 
@@ -84,7 +80,7 @@ export default function usePPGProcessing(
     if (isRecording) {
       setPpgData([]); setValleys([]);
       setHeartRate({bpm:0,confidence:0}); setHRV({sdnn:0,confidence:0});
-      gate.current={contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:0,duration:0,correlation:0,amplitude:0,beats:0};contactSince.current=null;sampleTimes.current=[];sampleBuffer.current=[];frameTimes.current=[];mediaEpoch.current=null;lastPublish.current=0;
+      gate.current={contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:0,duration:0,correlation:0,amplitude:0,beats:0};contactSince.current=null;sampleBuffer.current=[];frameTimes.current=[];mediaEpoch.current=null;lastPublish.current=0;
       lastVideoTime.current=-1; lastAnalysis.current=0;
       fpsRef.current=30;
     }
@@ -118,22 +114,8 @@ export default function usePPGProcessing(
 
     try {
       context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      if(!contactCanvas.current){contactCanvas.current=document.createElement('canvas');contactCanvas.current.width=32;contactCanvas.current.height=24;}
-      const contactContext=contactCanvas.current.getContext('2d',{willReadFrequently:true});
-      if(!contactContext)return;
-      contactContext.drawImage(videoRef.current,0,0,32,24);
-      const contact=contactCandidate(contactContext.getImageData(0,0,32,24).data);
-      gate.current.contact=contact;
-      if(!contact){
-        contactSince.current=null;sampleTimes.current=[];sampleBuffer.current=[];gate.current={contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:measured,duration:0,correlation:0,amplitude:0,beats:0};
-        setPpgData(prev=>prev.length?[]:prev);setValleys(prev=>prev.length?[]:prev);
-        setHeartRate(prev=>prev.bpm?{bpm:0,confidence:0}:prev);setHRV(prev=>prev.confidence?{sdnn:0,confidence:0}:prev);
-        return;
-      }
       if(contactSince.current===null)contactSince.current=performance.now();
       gate.current.duration=(performance.now()-contactSince.current)/1000;
-      if(sampleBuffer.current.length<100)gate.current.reason="맥파 수집 중";
-
 
       let rSum = 0,
         gSum = 0,
@@ -147,10 +129,8 @@ export default function usePPGProcessing(
 
           // Validate coordinates
           if (x >= 0 && x < canvas.width && y >= 0 && y < canvas.height) {
-            // Average a 16x16 patch at each of the original five locations.
-            // This preserves weak, sub-integer pulse variations instead of 0.2 steps.
-            const pixels = context.getImageData(Math.max(0,x-8),Math.max(0,y-8),16,16).data;
-            for(let i=0;i<pixels.length;i+=4){rSum+=pixels[i];gSum+=pixels[i+1];bSum+=pixels[i+2];validSamples++;}
+            const pixel = context.getImageData(x, y, 1, 1).data;
+            rSum += pixel[0];gSum += pixel[1];bSum += pixel[2];validSamples++;
 
             // Visualize sampling points
             context.beginPath();
@@ -186,29 +166,20 @@ export default function usePPGProcessing(
           ppgSignal = (2 * rSum - gSum - bSum) / validSamples;
       }
 
-      sampleTimes.current=[...sampleTimes.current.slice(-899),sampleTime];
-      const newData=[...sampleBuffer.current.slice(-899),ppgSignal];
+      const newData=[...sampleBuffer.current.slice(-300),ppgSignal];
       sampleBuffer.current=newData;
       // UI/quality snapshots at 8 Hz; optical sampling stays at camera cadence.
       if(now-lastPublish.current>=125){lastPublish.current=now;setPpgData(newData)}
         if (newData.length >= 100 && performance.now() - lastAnalysis.current >= 500) {
           lastAnalysis.current = performance.now();
-          const recentCount=Math.min(newData.length,Math.round(fpsRef.current*8));
-          const assessment=pulseAssessment(newData,fpsRef.current);
           const newValleys=detectValleys(newData);
-          const recentValleys=newValleys.filter(v=>v.index>=newData.length-recentCount);
-          const duration=performance.now()-(contactSince.current??performance.now());
-          const stable=duration>=5000&&assessment.ok&&recentValleys.length>=4;
-          const hrvReady=stable&&newValleys.length>=11&&newValleys[newValleys.length-1].timestamp.getTime()-newValleys[0].timestamp.getTime()>=10000;
-          gate.current={contact:true,stable,hrvReady,reason:duration<5000?'맥파 수집 중':!assessment.ok?assessment.reason:recentValleys.length<4?'맥박 간격 수집 중':'',fps:fpsRef.current,duration:duration/1000,correlation:assessment.correlation,amplitude:assessment.amplitude,beats:newValleys.length};
-          setValleys(stable?newValleys:[]);
-
-          const heartRateValue = calculateHeartRate(recentValleys);
-          setHeartRate(stable?heartRateValue:{bpm:0,confidence:0});
-          setConfidence(confidence);
-
-          const hrvValues = calculateHRV(newValleys);
-          setHRV(gate.current.hrvReady?hrvValues:{sdnn:0,confidence:0});
+          const heartRateValue=calculateHeartRate(newValleys);
+          const hrvValues=calculateHRV(newValleys);
+          // Original HeartLens calculation, without added contact/periodicity gates.
+          gate.current={contact:true,stable:heartRateValue.bpm>0,hrvReady:hrvValues.confidence>0,reason:heartRateValue.bpm>0?'':'맥박 간격 수집 중',fps:fpsRef.current,duration:(performance.now()-(contactSince.current??performance.now()))/1000,correlation:0,amplitude:Math.max(...newData)-Math.min(...newData),beats:newValleys.length};
+          setValleys(newValleys);
+          setHeartRate(heartRateValue);
+          setHRV(hrvValues);
         }
 
     } catch (err) {
@@ -223,9 +194,9 @@ export default function usePPGProcessing(
   ): Valley[] => {
     const valleys: Valley[] = [];
     const minValleyDistance = Math.floor(providedFps * 0.4); // Minimum 0.4 seconds between valleys
-    const windowSize = Math.max(1,Math.floor(providedFps * 0.15)); // 0.5 second window for smoothing
+    const windowSize = Math.floor(providedFps * 0.5); // 0.5 second window for smoothing
 
-    const normalizedSignal = normalizeSignal(detrendPulse(signal,providedFps));
+    const normalizedSignal = normalizeSignal(signal);
 
     for (let i = windowSize; i < normalizedSignal.length - windowSize; i++) {
       if (isLocalMinimum(normalizedSignal, i, windowSize)) {
@@ -234,7 +205,9 @@ export default function usePPGProcessing(
           i - valleys[valleys.length - 1].index >= minValleyDistance
         ) {
           valleys.push({
-            timestamp: new Date(sampleTimes.current[i] ?? Date.now()),
+            timestamp: new Date(
+              Date.now() - ((signal.length - i) / providedFps) * 1000
+            ),
             value: signal[i],
             index: i,
           });

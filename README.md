@@ -43,3 +43,6 @@ The original five sampling locations now average 16×16 pixels each to preserve 
 These are engineering heuristics, not a validated tissue/liveness classifier or medical measurement. Red objects/synthetic periodic illumination may still fool them; legitimate fingers may be rejected in unsupported lighting. Device-level validation and algorithm-team review remain required. `node tests/measurementValidity.test.cjs` checks non-contact colors, darkness, flat signals, exposure drift, noise, weak-pulse recovery and synthetic 60/75/90/120 BPM timestamps. It does not establish real-world accuracy.
 
 카메라 프레임 처리: 지원 브라우저에서는 requestVideoFrameCallback의 프레임 번호와 미디어 시각을 사용한다. 콜백이 멈추거나 미지원이면 디코딩 프레임 카운터 기반 루프로 전환한다. 실제 처리 간격의 최근 3초로 FPS를 계산하며 카메라 설정 FPS와 별도로 표시한다. 광학 샘플은 프레임마다 수집하고 React 신호 갱신은 최대 8Hz, 미리보기 복사는 약 15Hz로 제한한다. 신호 처리 캔버스는 320×240이다. 프레임 부족 검증 기준을 낮추거나 누락된 생체 수치를 생성하지 않는다.
+
+### 현재 배포: HeartLens 원래 계산 방식 복원
+2026-11-25 기준 카메라에서는 위에 설명된 접촉 후보·자기상관 주기성·최소 5초/골점 11개 표시 제한을 사용하지 않는다. 해당 버전은 원격 브랜치 `codex/backup-periodicity-gate-20261125`(bd211b1)에 보관했다. RGB 5지점 단일 픽셀 추출, 301개 샘플 버퍼, 원래 골점 검출 및 HR/SDNN 계산으로 복원했다. 품질 모델은 계속 평가·표시하며 수치 표시를 차단하지 않는다. 디코딩 프레임 기반 처리와 UI 갱신 부하 개선은 유지한다. 피부 접촉을 가정하는 데모이며 비생체 영상에서도 수치가 산출될 수 있다. measurementValidity 유틸리티는 참고용으로 남아 있지만 카메라 처리 경로에서 호출하지 않는다.
