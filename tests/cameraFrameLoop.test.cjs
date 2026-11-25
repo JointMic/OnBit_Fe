@@ -1,0 +1,17 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');const ts=require('typescript');
+const moduleOut={exports:{}};
+new Function('exports','module',ts.transpileModule(fs.readFileSync('src/lib/cameraFrameLoop.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(moduleOut.exports,moduleOut);
+const {startCameraFrameLoop,sampledFrameRate}=moduleOut.exports;
+assert.ok(Math.abs(sampledFrameRate(Array.from({length:91},(_,i)=>i*1000/30))-30)<.001);
+assert.equal(sampledFrameRate([1,1,1]),0);
+let queued, cancelled=false, count=0, frameCount=1;
+global.requestAnimationFrame=fn=>(queued=fn,1);global.cancelAnimationFrame=()=>{cancelled=true};
+const video={readyState:2,currentTime:1,getVideoPlaybackQuality:()=>({totalVideoFrames:frameCount})};
+const stop=startCameraFrameLoop(video,()=>count++);
+queued(0);queued(16);assert.equal(count,1);frameCount++;queued(32);assert.equal(count,2,'decoded counter handles rounded currentTime');stop();assert.ok(cancelled);queued(48);assert.equal(count,2);
+let nativeTick,nativeCancelled=false;count=0;
+const nativeVideo={...video,requestVideoFrameCallback:fn=>(nativeTick=fn,2),cancelVideoFrameCallback:()=>nativeCancelled=true};
+const stopNative=startCameraFrameLoop(nativeVideo,(_,frame)=>{count++;assert.equal(frame.mediaTime,2)});
+nativeTick(1,{presentedFrames:10,mediaTime:2});assert.equal(count,1);stopNative();assert.ok(nativeCancelled);nativeTick(2,{presentedFrames:11,mediaTime:3});assert.equal(count,1);
+console.log('Camera frame cadence, deduplication and cancellation checks passed');

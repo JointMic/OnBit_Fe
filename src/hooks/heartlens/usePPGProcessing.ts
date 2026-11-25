@@ -1,3 +1,4 @@
+import {sampledFrameRate} from '../../lib/cameraFrameLoop';
 import {contactCandidate,pulseAssessment,detrendPulse} from '../../lib/measurementValidity';
 // hooks/usePPGProcessing.ts
 import { useState, useRef, useEffect } from 'react';
@@ -31,7 +32,7 @@ interface PPGProcessingResult {
   valleys: Valley[];
   heartRate: HeartRateResult;
   hrv: HRVResult;
-  processFrame: () => void;
+  processFrame: (frameId?:number,mediaTime?:number) => void;
   getValidity: () => {contact:boolean;stable:boolean;hrvReady:boolean;reason:string;fps:number;duration:number;correlation:number;amplitude:number;beats:number};
 }
 
@@ -66,6 +67,10 @@ export default function usePPGProcessing(
   const [hrv, setHRV] = useState<HRVResult>({ sdnn: 0, confidence: 0 });
 
   const gate = useRef({contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:0,duration:0,correlation:0,amplitude:0,beats:0});
+  const sampleBuffer=useRef<number[]>([]);
+  const frameTimes=useRef<number[]>([]);
+  const mediaEpoch=useRef<number|null>(null);
+  const lastPublish=useRef(0);
   const sampleTimes=useRef<number[]>([]);
   const contactSince = useRef<number|null>(null);
   const contactCanvas = useRef<HTMLCanvasElement|null>(null);
@@ -74,16 +79,14 @@ export default function usePPGProcessing(
 
 
   const fpsRef = useRef<number>(30);
-  const frameTimeRef = useRef<number>(0);
-  const framesRef = useRef<number>(0);
 
   useEffect(() => {
     if (isRecording) {
       setPpgData([]); setValleys([]);
       setHeartRate({bpm:0,confidence:0}); setHRV({sdnn:0,confidence:0});
-      gate.current={contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:0,duration:0,correlation:0,amplitude:0,beats:0};contactSince.current=null;sampleTimes.current=[];
+      gate.current={contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:0,duration:0,correlation:0,amplitude:0,beats:0};contactSince.current=null;sampleTimes.current=[];sampleBuffer.current=[];frameTimes.current=[];mediaEpoch.current=null;lastPublish.current=0;
       lastVideoTime.current=-1; lastAnalysis.current=0;
-      frameTimeRef.current=performance.now(); framesRef.current=0; fpsRef.current=30;
+      fpsRef.current=30;
     }
   }, [isRecording]);
 
@@ -95,31 +98,22 @@ export default function usePPGProcessing(
     { x: 0.8, y: 0.8 }, // bottom-right
   ];
 
-  // Measure FPS
-  const measureFPS = () => {
-    const now = performance.now();
-    const elapsed = now - frameTimeRef.current;
-
-    if (elapsed >= 1000) {
-      const currentFps = Math.round((framesRef.current * 1000) / elapsed);
-      fpsRef.current = currentFps;
-      framesRef.current = 0;
-      frameTimeRef.current = now;
-    }
-    framesRef.current++;
-  };
-
-  // Process each video frame
-  const processFrame = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    // Process each camera frame once, rather than counting display refreshes.
-    if (videoRef.current.readyState < 2 || videoRef.current.currentTime === lastVideoTime.current) return;
-    lastVideoTime.current = videoRef.current.currentTime;
-    measureFPS();
+  // A frame's identity comes from compositor metadata, not rounded currentTime.
+  const processFrame = (frameId?:number,mediaTime?:number) => {
+    if(!videoRef.current||!canvasRef.current||videoRef.current.readyState<2)return;
+    const identity=frameId??videoRef.current.currentTime;
+    if(identity===lastVideoTime.current)return;
+    lastVideoTime.current=identity;
+    const now=performance.now();
+    if(mediaEpoch.current===null&&mediaTime!==undefined)mediaEpoch.current=Date.now()-mediaTime*1000;
+    const sampleTime=mediaTime!==undefined&&mediaEpoch.current!==null?mediaEpoch.current+mediaTime*1000:Date.now();
+    frameTimes.current=[...frameTimes.current.filter(t=>sampleTime-t<=3000),sampleTime];
+    const measured=sampledFrameRate(frameTimes.current);
+    if(measured>0)fpsRef.current=measured;
+    gate.current.fps=measured;
 
     const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d',{willReadFrequently:true});
     if (!context) return;
 
     try {
@@ -131,12 +125,14 @@ export default function usePPGProcessing(
       const contact=contactCandidate(contactContext.getImageData(0,0,32,24).data);
       gate.current.contact=contact;
       if(!contact){
-        contactSince.current=null;sampleTimes.current=[];gate.current={contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:0,duration:0,correlation:0,amplitude:0,beats:0};
+        contactSince.current=null;sampleTimes.current=[];sampleBuffer.current=[];gate.current={contact:false,stable:false,hrvReady:false,reason:'손가락 접촉 대기',fps:measured,duration:0,correlation:0,amplitude:0,beats:0};
         setPpgData(prev=>prev.length?[]:prev);setValleys(prev=>prev.length?[]:prev);
         setHeartRate(prev=>prev.bpm?{bpm:0,confidence:0}:prev);setHRV(prev=>prev.confidence?{sdnn:0,confidence:0}:prev);
         return;
       }
       if(contactSince.current===null)contactSince.current=performance.now();
+      gate.current.duration=(performance.now()-contactSince.current)/1000;
+      if(sampleBuffer.current.length<100)gate.current.reason="맥파 수집 중";
 
 
       let rSum = 0,
@@ -190,9 +186,11 @@ export default function usePPGProcessing(
           ppgSignal = (2 * rSum - gSum - bSum) / validSamples;
       }
 
-      sampleTimes.current=[...sampleTimes.current.slice(-899),Date.now()];
-      setPpgData((prev) => {
-        const newData = [...prev.slice(-899), ppgSignal];
+      sampleTimes.current=[...sampleTimes.current.slice(-899),sampleTime];
+      const newData=[...sampleBuffer.current.slice(-899),ppgSignal];
+      sampleBuffer.current=newData;
+      // UI/quality snapshots at 8 Hz; optical sampling stays at camera cadence.
+      if(now-lastPublish.current>=125){lastPublish.current=now;setPpgData(newData)}
         if (newData.length >= 100 && performance.now() - lastAnalysis.current >= 500) {
           lastAnalysis.current = performance.now();
           const recentCount=Math.min(newData.length,Math.round(fpsRef.current*8));
@@ -212,8 +210,7 @@ export default function usePPGProcessing(
           const hrvValues = calculateHRV(newValleys);
           setHRV(gate.current.hrvReady?hrvValues:{sdnn:0,confidence:0});
         }
-        return newData;
-      });
+
     } catch (err) {
       console.error('Error in processFrame:', err);
     }
