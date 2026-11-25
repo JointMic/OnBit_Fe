@@ -11,3 +11,8 @@ Monitor에서 4자리 코드(예: 1234)를 입력하고 Start → START RECORDIN
 
 ## 위젯
 사용자가 제공한 DraggableWidgetGrid를 `src/components/ui/draggable-widget-grid.tsx`에 통합했습니다. 마우스 드래그, 터치 길게 누르기, Alt+방향키 이동과 로컬 배치 저장을 지원합니다.
+
+## Production
+Consumer: https://onbit-fe.vercel.app
+Monitor: https://onbit-monitor.vercel.app
+`vercel.json` forwards /api to the Monitor production URL. DB credentials exist only in Monitor server environment variables. Deploy with `vercel deploy --prod --scope pdgdaccord`.
