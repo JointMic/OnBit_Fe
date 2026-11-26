@@ -39,5 +39,6 @@
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
-  ]
+  ],
+  "installCommand": "npm ci"
 }
