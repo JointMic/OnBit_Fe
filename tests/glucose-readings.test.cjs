@@ -1,0 +1,10 @@
+const fs=require('node:fs'),ts=require('typescript'),assert=require('node:assert/strict');
+const source=ts.transpileModule(fs.readFileSync('src/lib/glucoseReadings.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const out={};new Function('exports',source)(out);
+const t='2026-11-26T00:00:00.000Z',u='2026-11-26T00:00:05.000Z';
+const rows=[{glucose:120.5,glucoseAt:t},{glucose:120.5,glucoseAt:t,glucoseStatus:'waiting'},{glucose:120.5,glucoseAt:u},{glucose:null,glucoseAt:u},{glucose:NaN,glucoseAt:u},{glucose:110},{glucose:110,glucoseAt:'bad-time'}];
+assert.deepEqual(out.glucosePoints(rows),[{time:t,value:120.5},{time:u,value:120.5}]);
+assert.deepEqual(out.glucosePoints(rows,Date.parse(u)),[{time:u,value:120.5}]);
+assert.deepEqual(out.glucosePoints([]),[]);
+assert.deepEqual(out.glucosePoints([...rows].reverse()).map(p=>p.time),[t,u]);
+console.log('Glucose estimates: deduplicated by actual inference time; repeated equal estimates retained, invalid/undated values omitted, ranges applied.');

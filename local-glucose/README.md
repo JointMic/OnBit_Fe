@@ -45,3 +45,6 @@ HeartLensEngine 컴포넌트에 원본 PPG 훅을 격리해 원본 샘플 계산
 현재 Worker는 `src/lib/ppgQualityFeatures.ts`를 사용한다. 앞의 ‘원본 특징 계산식 유지’ 설명은 이전 버전 기록이다. BIOF3003_Backend.ipynb의 `extract_ppg_features`와 맞춰 FFT 세 특징(전체 N점, 패딩 없음), 왜도/첨도 분모 epsilon, 음수 샘플 비율, SNR(var(signal)/var(abs(signal)))을 사용한다. 기존 19입력→3분류 모델 가중치는 그대로이며 구조도 Colab과 일치한다. Colab 링크: https://colab.research.google.com/drive/1Ixaw6fdpRqHEStTKe70s2fsco5P0r_Hx . ‘3초 고정 구간’은 확인되지 않아 추가하지 않았다. 버퍼 길이는 기존대로 최대 301개 샘플이다. 특징은 Worker에서 계산하므로 UI 스레드에 FFT를 추가하지 않았다.
 
 검증: `uv run --python 3.12 --with numpy python tests/generate-quality-reference.py`로 NumPy 기준값 생성 후 `node tests/quality-features.test.cjs`. 7종 입력의 특징 19개를 비교하며 실제 분류 정확도 향상을 입증하는 테스트는 아니다. 혈당용 best.pt와 HR/HRV 계산식은 변경하지 않았다.
+
+## 혈당 화면
+홈 혈당 카드는 HR/HRV와 같은 크기로 유지하고 선택하면 혈당 추이 탭으로 이동한다. 추이에서는 실시간/30초/1분/5분/전체 범위를 선택하며 현재·평균·최저·최고 및 추정 기록을 확인한다. 상세 보기에는 그래프, 최소·평균·최대, 접을 수 있는 분석 정보와 추정 시각별 기록이 있다. 그래프·통계는 glucoseAt(실제 성공한 추정 시각)별로 중복을 제거하며 화면에 재표시된 마지막 값은 새 결과로 세지 않는다. 혈당 새 결과는 기존 5초 HR 기록 간격 안에 발생해도 보관한다. 측정 종료 후에는 마지막 수신 시각을 기준으로 그래프 범위를 유지한다.

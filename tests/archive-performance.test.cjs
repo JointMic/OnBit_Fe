@@ -19,4 +19,5 @@ const before=formats;render([...rows,row(1500)]);
 assert.equal(formats-before,1,'An appended reading must format only its own date, not 1500 old readings');
 const after=formats;render([...rows,row(1500)]);assert.equal(formats,after,'Duplicate snapshots must not reprocess old data');
 assert.equal(out.dayKey('2026-11-25T15:00:00Z'),'2026-11-26','Seoul date boundary');
+const accepted={...row(1501),glucose:123.4,glucoseAt:row(1501).updatedAt};render([...rows,row(1500),accepted]);const archived=render([...rows,row(1500),accepted]);assert.equal(archived.archive['2026-11-26'].at(-1).glucoseAt,accepted.glucoseAt,'New glucose result is archived even inside the usual five-second HR sampling interval');
 console.log('Archive regression checks passed: incremental processing, duplicate snapshots, Seoul day boundary');
