@@ -21,7 +21,11 @@ class InferenceTests(unittest.TestCase):
         self.assertNotEqual(self.engine.infer({'samples':x})['status'],'inferred')
     def test_gap_does_not_infer(self):
         times=np.r_[np.arange(0,3,1/30),np.arange(4,8,1/30)]
-        self.assertEqual(self.engine.infer({'samples':[[float(t),1.] for t in times]})['status'],'gap')
+        self.assertEqual(self.engine.infer({'samples':[[float(t),1.] for t in times]})['status'],'buffering')
+    def test_old_gap_recovers_with_continuous_tail(self):
+        times=np.r_[np.arange(0,1,1/30),np.arange(2,8,1/30)]
+        result=self.engine.infer({'samples':[[float(t),200.] for t in times]})
+        self.assertNotIn(result['status'],('buffering','gap'))
     def test_bad_timestamps(self):
         with self.assertRaises(ValueError):self.engine.infer({'samples':[[1,2],[1,3]]})
     def test_extracted_functions_unchanged(self):

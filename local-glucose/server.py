@@ -25,6 +25,7 @@ class Engine:
         self.model.eval()
         self.epoch=checkpoint['epoch']
         self.lock=threading.Lock()
+        self.last_diagnostics={}
         torch.set_num_threads(1)
 
     def infer(self,packet):
@@ -43,8 +44,14 @@ class Engine:
         times,values=times[keep],values[keep]
         if len(times)<2 or times[-1]-times[0]<4:
             return {'status':'buffering'}
-        if np.diff(times).max()>.25:
-            return {'status':'gap'}
+        # Do not keep rejecting an old gap for the full eight-second context.
+        # Restart the model buffer at the most recent discontinuity.
+        gaps=np.flatnonzero(np.diff(times)>.25)
+        if len(gaps):
+            times,values=times[gaps[-1]+1:],values[gaps[-1]+1:]
+            if len(times)<2 or times[-1]-times[0]<4:
+                return {'status':'buffering','reason':'gap_recovery','buffer_s':float(times[-1]-times[0])}
+
         grid=times[0]+np.arange(int(np.floor((times[-1]-times[0])*64))+1)/64
         volts=np.interp(grid,times,values)
         cleaned=p.clean(volts,64)
@@ -74,14 +81,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
     def do_GET(self):
         if self.path!='/api/glucose/health':return self.reply({'error':'Not found'},404)
-        self.reply({'status':'ready','epoch':self.server.engine.epoch,'cutoff':self.server.engine.settings['cosine_cutoff'],'input':'camera-adapter','experimental':True})
+        self.reply({'status':'ready','epoch':self.server.engine.epoch,'cutoff':self.server.engine.settings['cosine_cutoff'],'input':'camera-adapter','experimental':True,'last_request':self.server.engine.last_diagnostics})
     def do_POST(self):
         if self.path!='/api/glucose/infer':return self.reply({'error':'Not found'},404)
         try:
             length=int(self.headers.get('Content-Length',0))
             if not 0<length<=150000:raise ValueError('Invalid request size')
             packet=json.loads(self.rfile.read(length))
+            start=time.perf_counter()
             result=self.server.engine.infer(packet)
+            result['server_ms']=(time.perf_counter()-start)*1000
+            self.server.engine.last_diagnostics={k:v for k,v in result.items() if k not in ('estimate',)}
             self.reply(result)
         except (ValueError,TypeError,KeyError,OverflowError) as e:self.reply({'error':str(e)},400)
     def log_message(self,*args):pass

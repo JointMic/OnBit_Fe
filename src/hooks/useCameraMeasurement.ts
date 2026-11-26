@@ -1,7 +1,7 @@
 import {useGlucoseInference} from './useGlucoseInference'
 import {useEffect,useRef,useState} from 'react'
 import usePPGProcessing from './heartlens/usePPGProcessing'
-import useSignalQuality from './heartlens/useSignalQuality'
+import useSignalQuality from './useBackgroundSignalQuality'
 import type {Reading} from './useLive'
 export function useCameraMeasurement(){
  const videoRef=useRef<HTMLVideoElement>(null),canvasRef=useRef<HTMLCanvasElement>(null),previewRef=useRef<HTMLCanvasElement>(null);
@@ -11,7 +11,7 @@ export function useCameraMeasurement(){
  const [data,setData]=useState<Reading|null>(null),[series,setSeries]=useState<Reading[]>([]),[elapsed,setElapsed]=useState(0);const [torchAvailable,setTorchAvailable]=useState(false),[torch,setTorch]=useState(false);
  const glucose=useGlucoseInference(recording);
  const processor=usePPGProcessing(recording,'default',videoRef,canvasRef);
- const quality=useSignalQuality(processor.ppgData);
+ const quality=useSignalQuality(processor.ppgData,recording);
  const latest=useRef({processor,quality,glucose});latest.current={processor,quality,glucose};
  function stop(){attempt.current++;running.current=false;starting.current=false;stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;if(videoRef.current){videoRef.current.srcObject=null}if(mounted.current){setRecording(false);setPending(false);setTorch(false);setTorchAvailable(false);setData(v=>v?{...v,recording:false}:null)}}
  useEffect(()=>{mounted.current=true;const leave=()=>stop();window.addEventListener('pagehide',leave);const hidden=()=>{if(document.hidden)stop()};document.addEventListener('visibilitychange',hidden);return()=>{mounted.current=false;stop();window.removeEventListener('pagehide',leave);document.removeEventListener('visibilitychange',hidden)}},[]);
@@ -33,8 +33,8 @@ export function useCameraMeasurement(){
    if(videoRef.current)latest.current.glucose.capture(videoRef.current);
    if(previewRef.current&&canvasRef.current)previewRef.current.getContext('2d')?.drawImage(canvasRef.current,0,0,640,480);
    setElapsed(Math.floor((performance.now()-started)/1000));
-   const g=latest.current.glucose.result.current;
-   const row:Reading={glucose:g.status==='inferred'?g.estimate:null,glucoseStatus:g.status,glucoseSimilarity:g.similarity,glucoseAt:g.updatedAt,code:'camera',recording:true,valid:true,heartRate:p.heartRate.bpm,sdnn:p.hrv.sdnn,quality:q.signalQuality,updatedAt:new Date().toISOString()};
+   const g=latest.current.glucose.result.current;const accepted=latest.current.glucose.accepted.current;
+   const row:Reading={glucose:accepted?.estimate??null,glucoseStatus:g.status,glucoseSimilarity:g.similarity,glucoseAt:accepted?.updatedAt,glucoseScanAt:g.updatedAt,glucoseServerMs:g.server_ms,code:'camera',recording:true,valid:true,heartRate:p.heartRate.bpm,sdnn:p.hrv.sdnn,quality:q.signalQuality,updatedAt:new Date().toISOString()};
    setData(row);setSeries(v=>[...v.slice(-2999),row]);
    frame=requestAnimationFrame(tick);
   };
