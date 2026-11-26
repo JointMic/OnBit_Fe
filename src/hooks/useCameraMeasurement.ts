@@ -1,3 +1,4 @@
+import {useGlucoseInference} from './useGlucoseInference'
 import {useEffect,useRef,useState} from 'react'
 import usePPGProcessing from './heartlens/usePPGProcessing'
 import useSignalQuality from './heartlens/useSignalQuality'
@@ -8,9 +9,10 @@ export function useCameraMeasurement(){
  const [devices,setDevices]=useState<MediaDeviceInfo[]>([]);const [deviceId,setDeviceId]=useState('');
  const [recording,setRecording]=useState(false),[pending,setPending]=useState(false),[error,setError]=useState('');
  const [data,setData]=useState<Reading|null>(null),[series,setSeries]=useState<Reading[]>([]),[elapsed,setElapsed]=useState(0);const [torchAvailable,setTorchAvailable]=useState(false),[torch,setTorch]=useState(false);
+ const glucose=useGlucoseInference(recording);
  const processor=usePPGProcessing(recording,'default',videoRef,canvasRef);
  const quality=useSignalQuality(processor.ppgData);
- const latest=useRef({processor,quality});latest.current={processor,quality};
+ const latest=useRef({processor,quality,glucose});latest.current={processor,quality,glucose};
  function stop(){attempt.current++;running.current=false;starting.current=false;stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;if(videoRef.current){videoRef.current.srcObject=null}if(mounted.current){setRecording(false);setPending(false);setTorch(false);setTorchAvailable(false);setData(v=>v?{...v,recording:false}:null)}}
  useEffect(()=>{mounted.current=true;const leave=()=>stop();window.addEventListener('pagehide',leave);const hidden=()=>{if(document.hidden)stop()};document.addEventListener('visibilitychange',hidden);return()=>{mounted.current=false;stop();window.removeEventListener('pagehide',leave);document.removeEventListener('visibilitychange',hidden)}},[]);
  async function start(chosenId=deviceId){if(starting.current||running.current)return;setError('');if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){setError('HTTPS 환경에서 카메라를 지원하는 브라우저로 열어주세요.');return}starting.current=true;setPending(true);const id=++attempt.current;
@@ -28,9 +30,11 @@ export function useCameraMeasurement(){
    if(!running.current)return;
    const {processor:p,quality:q}=latest.current;
    p.processFrame();
+   if(videoRef.current)latest.current.glucose.capture(videoRef.current);
    if(previewRef.current&&canvasRef.current)previewRef.current.getContext('2d')?.drawImage(canvasRef.current,0,0,640,480);
    setElapsed(Math.floor((performance.now()-started)/1000));
-   const row:Reading={code:'camera',recording:true,valid:true,heartRate:p.heartRate.bpm,sdnn:p.hrv.sdnn,quality:q.signalQuality,updatedAt:new Date().toISOString()};
+   const g=latest.current.glucose.result.current;
+   const row:Reading={glucose:g.status==='inferred'?g.estimate:null,glucoseStatus:g.status,glucoseSimilarity:g.similarity,glucoseAt:g.updatedAt,code:'camera',recording:true,valid:true,heartRate:p.heartRate.bpm,sdnn:p.hrv.sdnn,quality:q.signalQuality,updatedAt:new Date().toISOString()};
    setData(row);setSeries(v=>[...v.slice(-2999),row]);
    frame=requestAnimationFrame(tick);
   };

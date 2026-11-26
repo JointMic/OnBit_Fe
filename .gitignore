@@ -7,3 +7,6 @@ dist/
 .vercel
 
 .vercel/
+
+local-glucose/assets/best.pt
+__pycache__/
