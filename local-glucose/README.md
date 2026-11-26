@@ -40,3 +40,8 @@ uv run --python 3.12 --with 'torch>=2.10,<3' --with 'numpy>=2,<3' --with 'scipy>
 
 ## 기록 누적 시 화면 처리 개선
 HeartLensEngine 컴포넌트에 원본 PPG 훅을 격리해 원본 샘플 계산은 그대로 진행하며 대시보드에는 최대 8Hz로 스냅샷을 전달한다. 영상 미리보기는 기존 RAF 루프에서 그린다. 기록 훅은 새 수신분만 날짜 변환하고 날짜 formatter를 재사용하며 저장은 별도 지연 작업으로 처리한다. NaN/무한대 계산 결과는 화면에 숫자로 표시하지 않는다(계산식은 유지).
+
+## PPG 품질 입력을 Colab 학습식에 맞춤 (2026-11-26)
+현재 Worker는 `src/lib/ppgQualityFeatures.ts`를 사용한다. 앞의 ‘원본 특징 계산식 유지’ 설명은 이전 버전 기록이다. BIOF3003_Backend.ipynb의 `extract_ppg_features`와 맞춰 FFT 세 특징(전체 N점, 패딩 없음), 왜도/첨도 분모 epsilon, 음수 샘플 비율, SNR(var(signal)/var(abs(signal)))을 사용한다. 기존 19입력→3분류 모델 가중치는 그대로이며 구조도 Colab과 일치한다. Colab 링크: https://colab.research.google.com/drive/1Ixaw6fdpRqHEStTKe70s2fsco5P0r_Hx . ‘3초 고정 구간’은 확인되지 않아 추가하지 않았다. 버퍼 길이는 기존대로 최대 301개 샘플이다. 특징은 Worker에서 계산하므로 UI 스레드에 FFT를 추가하지 않았다.
+
+검증: `uv run --python 3.12 --with numpy python tests/generate-quality-reference.py`로 NumPy 기준값 생성 후 `node tests/quality-features.test.cjs`. 7종 입력의 특징 19개를 비교하며 실제 분류 정확도 향상을 입증하는 테스트는 아니다. 혈당용 best.pt와 HR/HRV 계산식은 변경하지 않았다.
