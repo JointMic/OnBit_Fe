@@ -1,0 +1,15 @@
+{
+  "source": "best.pt",
+  "epoch": 11,
+  "input_shape": [
+    1,
+    1,
+    100
+  ],
+  "opset": 17,
+  "torch_sha256": "76ed80bf558599fc8dc6eaa8c79da70b6074ec2365400b592d3adabe7656cbc5",
+  "onnx_sha256": "1f3c0bba9d31fccc88c0979ee0c534a79c06f23b7708e3c5e0b06e1368bfe04a",
+  "parity_cases": 9,
+  "atol": 0.0001,
+  "rtol": 1e-05
+}

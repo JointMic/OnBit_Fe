@@ -2,14 +2,14 @@ import {useEffect,useRef} from 'react'
 export type GlucoseResult={status:string;estimate?:number;similarity?:number;crest?:number;updatedAt?:string;buffer_s?:number;reason?:string;server_ms?:number}
 // Independent adapter: original HeartLens processing hooks are not changed.
 export function useGlucoseInference(recording:boolean){
- const result=useRef<GlucoseResult>({status:import.meta.env.DEV?'idle':'local_only'});
+ const result=useRef<GlucoseResult>({status:'idle'});
  const accepted=useRef<{estimate:number;updatedAt:string}|null>(null);
  const samples=useRef<number[][]>([]),scratch=useRef<HTMLCanvasElement|null>(null);
  const lastFrame=useRef(-1),epoch=useRef<number|null>(null),previous=useRef<number|undefined>();
  const busy=useRef(false),lastRequest=useRef(0),session=useRef(0),controller=useRef<AbortController|null>(null);
- useEffect(()=>{session.current++;controller.current?.abort();busy.current=false;samples.current=[];epoch.current=null;lastFrame.current=-1;previous.current=undefined;accepted.current=null;lastRequest.current=0;result.current={status:import.meta.env.DEV?(recording?'buffering':'idle'):'local_only'};return()=>{session.current++;controller.current?.abort()}},[recording]);
+ useEffect(()=>{session.current++;controller.current?.abort();busy.current=false;samples.current=[];epoch.current=null;lastFrame.current=-1;previous.current=undefined;accepted.current=null;lastRequest.current=0;result.current={status:recording?'buffering':'idle'};return()=>{session.current++;controller.current?.abort()}},[recording]);
  function capture(video:HTMLVideoElement){
-  if(!import.meta.env.DEV||!recording||video.readyState<2||video.currentTime===lastFrame.current)return;
+  if(!recording||video.readyState<2||video.currentTime===lastFrame.current)return;
   lastFrame.current=video.currentTime;if(epoch.current===null)epoch.current=video.currentTime;
   const time=video.currentTime-epoch.current;
   if(!scratch.current){scratch.current=document.createElement('canvas');scratch.current.width=640;scratch.current.height=480}
@@ -28,4 +28,4 @@ export function useGlucoseInference(recording:boolean){
  }
  return {capture,result,accepted};
 }
-export function glucoseStatus(status?:string){return ({idle:'측정 대기',buffering:'신호 수집 중',waiting:'피크 검출 대기',gap:'신호 끊김',rejected:'파형 검사 미통과',inferred:'실험 모델 추정',unavailable:'로컬 모델 연결 안 됨',local_only:'로컬 데모에서 사용'} as Record<string,string>)[status||'']||'측정 대기'}
+export function glucoseStatus(status?:string){return ({idle:'측정 대기',buffering:'신호 수집 중',waiting:'피크 검출 대기',gap:'신호 끊김',rejected:'파형 검사 미통과',inferred:'실험 모델 추정',unavailable:'모델 서버 연결 안 됨',local_only:'로컬 데모에서 사용'} as Record<string,string>)[status||'']||'측정 대기'}

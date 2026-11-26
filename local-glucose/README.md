@@ -48,3 +48,10 @@ HeartLensEngine 컴포넌트에 원본 PPG 훅을 격리해 원본 샘플 계산
 
 ## 혈당 화면
 홈 혈당 카드는 HR/HRV와 같은 크기로 유지하고 선택하면 혈당 추이 탭으로 이동한다. 추이에서는 실시간/30초/1분/5분/전체 범위를 선택하며 현재·평균·최저·최고 및 추정 기록을 확인한다. 상세 보기에는 그래프, 최소·평균·최대, 접을 수 있는 분석 정보와 추정 시각별 기록이 있다. 그래프·통계는 glucoseAt(실제 성공한 추정 시각)별로 중복을 제거하며 화면에 재표시된 마지막 값은 새 결과로 세지 않는다. 혈당 새 결과는 기존 5초 HR 기록 간격 안에 발생해도 보관한다. 측정 종료 후에는 마지막 수신 시각을 기준으로 그래프 범위를 유지한다.
+
+## 원격 배포 및 PWA
+Vercel의 `/api/glucose/health`, `/api/glucose/infer`는 `api/glucose.py`와 `glucose_runtime/`를 사용한다. 같은 best.pt를 ONNX로 변환했으며 9종 입력에서 PyTorch 출력과 비교한다. Python 배포에는 NumPy, SciPy, ONNX Runtime만 포함한다. 템플릿, 피크 검출, 전처리 및 유사도 0.85 기준은 로컬 버전과 동일하다. 원시 요청은 메모리에서만 처리하고 서버에 기록하지 않는다. 기존 ‘로컬 전용’ 설명은 이전 버전 기록이다.
+
+변환 재현: `uv run --python 3.12 --with torch --with numpy --with onnx --with onnxscript --with onnxruntime python local-glucose/export_onnx.py`.
+
+PWA: 배포 링크를 Safari/Chrome에서 열고 홈 화면에 추가한다. manifest·아이콘·standalone 화면을 제공한다. 서비스워커는 앱 셸과 정적 파일만 캐시하고 `/api/`와 카메라 데이터는 캐시하지 않는다. 원격 혈당 추론에는 네트워크가 필요하다.
