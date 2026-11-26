@@ -10,3 +10,5 @@ dist/
 
 local-glucose/assets/best.pt
 __pycache__/
+
+.venv/

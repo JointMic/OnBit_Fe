@@ -1,5 +1,6 @@
 """Same-origin experimental glucose inference; samples are processed in memory only."""
 import json
+import time
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse,parse_qs
@@ -23,7 +24,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             n=int(self.headers.get('Content-Length','0'))
             if not 0<n<=150000:raise ValueError('Invalid request size')
-            packet=json.loads(self.rfile.read(n));result=engine().infer(packet);self.reply(result)
+            packet=json.loads(self.rfile.read(n));start=time.perf_counter();result=engine().infer(packet);result['server_ms']=(time.perf_counter()-start)*1000;self.reply(result)
         except (ValueError,TypeError,KeyError,OverflowError):self.reply({'error':'Invalid PPG packet'},400)
         except Exception:self.reply({'error':'Model inference unavailable'},503)
     def log_message(self,*args):pass

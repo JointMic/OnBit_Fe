@@ -7,7 +7,7 @@ export function useGlucoseInference(recording:boolean){
  const samples=useRef<number[][]>([]),scratch=useRef<HTMLCanvasElement|null>(null);
  const lastFrame=useRef(-1),epoch=useRef<number|null>(null),previous=useRef<number|undefined>();
  const busy=useRef(false),lastRequest=useRef(0),session=useRef(0),controller=useRef<AbortController|null>(null);
- useEffect(()=>{session.current++;controller.current?.abort();busy.current=false;samples.current=[];epoch.current=null;lastFrame.current=-1;previous.current=undefined;accepted.current=null;lastRequest.current=0;result.current={status:recording?'buffering':'idle'};return()=>{session.current++;controller.current?.abort()}},[recording]);
+ useEffect(()=>{session.current++;controller.current?.abort();busy.current=false;samples.current=[];epoch.current=null;lastFrame.current=-1;previous.current=undefined;accepted.current=null;lastRequest.current=0;result.current={status:recording?'buffering':'idle'};const warm=new AbortController();if(recording)fetch('/api/glucose/health',{signal:warm.signal}).catch(()=>{});return()=>{warm.abort();session.current++;controller.current?.abort()}},[recording]);
  function capture(video:HTMLVideoElement){
   if(!recording||video.readyState<2||video.currentTime===lastFrame.current)return;
   lastFrame.current=video.currentTime;if(epoch.current===null)epoch.current=video.currentTime;
@@ -19,7 +19,7 @@ export function useGlucoseInference(recording:boolean){
   samples.current=[...samples.current.filter(s=>time-s[0]<=8),[time,value/5]];
   if(time<4||busy.current||performance.now()-lastRequest.current<500)return;
   const id=session.current;busy.current=true;lastRequest.current=performance.now();const abort=new AbortController();controller.current=abort;
-  const timeout=setTimeout(()=>abort.abort(),6000);
+  const timeout=setTimeout(()=>abort.abort(),25000);if(!accepted.current)result.current={...result.current,status:'processing'};
   fetch('/api/glucose/infer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({samples:samples.current,previous:previous.current}),signal:abort.signal})
    .then(async r=>{if(!r.ok)throw Error();return await r.json() as GlucoseResult})
    .then(r=>{if(id!==session.current)return;if(r.crest!==undefined)previous.current=r.crest;const updatedAt=new Date().toISOString();if(r.status==='inferred'&&r.estimate!==undefined)accepted.current={estimate:r.estimate,updatedAt};result.current={...result.current,...r,updatedAt}})
@@ -28,4 +28,4 @@ export function useGlucoseInference(recording:boolean){
  }
  return {capture,result,accepted};
 }
-export function glucoseStatus(status?:string){return ({idle:'측정 대기',buffering:'신호 수집 중',waiting:'피크 검출 대기',gap:'신호 끊김',rejected:'파형 검사 미통과',inferred:'실험 모델 추정',unavailable:'모델 서버 연결 안 됨',local_only:'로컬 데모에서 사용'} as Record<string,string>)[status||'']||'측정 대기'}
+export function glucoseStatus(status?:string){return ({idle:'측정 대기',processing:'분석 중',buffering:'신호 수집 중',waiting:'피크 검출 대기',gap:'신호 끊김',rejected:'파형 검사 미통과',inferred:'실험 모델 추정',unavailable:'모델 서버 연결 안 됨',local_only:'로컬 데모에서 사용'} as Record<string,string>)[status||'']||'측정 대기'}
