@@ -1,0 +1,9 @@
+[project]
+name = "onbit-glucose-inference"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy==1.26.4",
+  "scipy==1.13.1",
+  "onnxruntime==1.20.1",
+]
